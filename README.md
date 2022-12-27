@@ -26,6 +26,10 @@ You can then use the get_node method to look up the node for a given key:
 
 let node = hash.get_node("key1");
 ```
+## Contributing
+
+Just fork it, implement your changes and submit a pull request.
+
 
 ## Examples
 
