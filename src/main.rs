@@ -1,53 +1,50 @@
-use std::env;
-use std::io::{self, BufRead, Write};
-use std::net::TcpStream;
-use std::str::FromStr;
+extern crate md5;
 
-use native_tls::{TlsConnector, TlsStream};
+use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 4 {
-        println!("Usage: imap_client <hostname> <port> <username>");
-        return Ok(());
+struct Node<T> {
+    key: u64,
+    value: T,
+}
+
+impl<T> Node<T> {
+    fn new(key: u64, value: T) -> Self {
+        Self { key, value }
+    }
+}
+
+struct ConsistentHash<T> {
+    nodes: BTreeMap<u64, T>,
+}
+
+impl<T> ConsistentHash<T> {
+    fn new() -> Self {
+        Self {
+            nodes: BTreeMap::new(),
+        }
     }
 
-    let hostname = &args[1];
-    let port = u16::from_str(&args[2])?;
-    let username = &args[3];
+    fn add_node(&mut self, node: Node<T>) {
+        self.nodes.insert(node.key, node.value);
+    }
 
-    // Connect to the server
-    let mut stream = if port == 993 {
-        // Use SSL if the port is 993 (typical for IMAPS)
-        let ssl = TlsConnector::new()?;
-        let stream = TcpStream::connect((hostname, port))?;
-        let stream = ssl.connect(hostname, stream)?;
-        stream
-    } else {
-        TcpStream::connect((hostname, port))?
-    };
+    fn get_node(&self, key: &str) -> Option<&T> {
+        let mut hasher = md5::Md5::new();
+        hasher.write(key.as_bytes());
+        let hash = hasher.finish();
+        let key = hash.iter().fold(0, |acc, &b| (acc << 8) | u64::from(b));
+        self.nodes.range(..=key).next_back().map(|(_, value)| value)
+    }
+}
 
-    // Read the greeting message
-    let mut reader = io::BufReader::new(&stream);
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-    println!("{}", line);
+fn main() {
+    let mut hash = ConsistentHash::new();
+    hash.add_node(Node::new(0, "Node 1"));
+    hash.add_node(Node::new(1, "Node 2"));
+    hash.add_node(Node::new(2, "Node 3"));
 
-    // Send the LOGIN command
-    print!("Enter password: ");
-    io::stdout().flush()?;
-    let mut password = String::new();
-    io::stdin().read_line(&mut password)?;
-    writeln!(stream, "LOGIN {} {}", username, password.trim())?;
-    line.clear();
-    reader.read_line(&mut line)?;
-    println!("{}", line);
-
-    // Send the LOGOUT command
-    writeln!(stream, "LOGOUT")?;
-    line.clear();
-    reader.read_line(&mut line)?;
-    println!("{}", line);
-
-    Ok(())
+    println!("{:?}", hash.get_node("key1"));
+    println!("{:?}", hash.get_node("key2"));
+    println!("{:?}", hash.get_node("key3"));
 }
